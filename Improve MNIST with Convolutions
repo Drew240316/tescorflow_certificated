@@ -1,0 +1,245 @@
+Week 3: Improve MNIST with Convolutions
+In the lectures you looked at how you would improve Fashion MNIST using Convolutions. For this assignment, see if you can improve MNIST to 99.5% accuracy or more by adding only a single convolutional layer and a single MaxPooling 2D layer to the model from the assignment of the previous week.
+
+Some notes:
+
+Your network should succeed in less than 10 epochs.
+When it reaches 99.5% or greater it should print out the string "Reached 99.5% accuracy so cancelling training!" and stop training.
+TIPS FOR SUCCESSFUL GRADING OF YOUR ASSIGNMENT:
+All cells are frozen except for the ones where you need to submit your solutions or when explicitly mentioned you can interact with it.
+
+You can add new cells to experiment but these will be omitted by the grader, so don't rely on newly created cells to host your solution code, use the provided places for this.
+
+You can add the comment # grade-up-to-here in any graded cell to signal the grader that it must only evaluate up to that point. This is helpful if you want to check if you are on the right track even if you are not done with the whole assignment. Be sure to remember to delete the comment afterwards!
+
+Avoid using global variables unless you absolutely have to. The grader tests your code in an isolated environment without running all cells from the top. As a result, global variables may be unavailable when scoring your submission. Global variables that are meant to be used will be defined in UPPERCASE.
+
+To submit your notebook, save it and then click on the blue submit button at the beginning of the page.
+
+import os
+import base64
+import numpy as np
+import tensorflow as tf
+import unittests
+Load and inspect the data
+Begin by loading the data. A couple of things to notice:
+
+The file mnist.npz is already included in the current workspace under the data directory. By default the load_data from Keras accepts a path relative to ~/.keras/datasets but in this case it is stored somewhere else, as a result of this, you need to specify the full path.
+
+tf.keras.datasets.mnist.load_data returns the train and test sets in the form of the tuples (training_images, training_labels), (testing_images, testing_labels) but in this exercise you will be needing only the train set so you can ignore the second tuple.
+
+# Get current working directory
+current_dir = os.getcwd()
+
+# Append data/mnist.npz to the previous path to get the full path
+data_path = os.path.join(current_dir, "data/mnist.npz")
+
+# Load data (discard test set)
+(training_images, training_labels), _ = tf.keras.datasets.mnist.load_data(path=data_path)
+
+print(f"training_images is of type {type(training_images)}.\ntraining_labels is of type {type(training_labels)}\n")
+
+# Inspect shape of the data
+data_shape = training_images.shape
+
+print(f"There are {data_shape[0]} examples with shape ({data_shape[1]}, {data_shape[2]})")
+training_images is of type <class 'numpy.ndarray'>.
+training_labels is of type <class 'numpy.ndarray'>
+
+There are 60000 examples with shape (28, 28)
+Pre-processing the data
+One important step when dealing with image data is to preprocess the data. During the preprocess step you can apply transformations to the dataset that will be fed into your convolutional neural network. This will be your first task of this assignment.
+
+Exercise 1: reshape_and_normalize
+You will apply two transformations to the data:
+
+Reshape the data so that it has an extra dimension at the end, counting the dimensions from left to right (such as you would count in a Python list). The reason for this is that commonly you will use 3-dimensional arrays (without counting the batch dimension) to represent image data. The third dimension represents the color using RGB (Red, Green and Blue) values. This data might be in black and white format so the third dimension doesn't really add any additional information for the classification process but it is a good practice regardless.
+
+Normalize the pixel values so that these are values between 0 and 1. You can achieve this by dividing every value in the array by the maximum pixel value.
+
+Remember that these tensors are of type numpy.ndarray so you can use functions like reshape or divide to complete the reshape_and_normalize function below. Vectorized operations also work!
+
+# GRADED FUNCTION: reshape_and_normalize
+
+def reshape_and_normalize(images):
+    """Reshapes the array of images and normalizes pixel values.
+
+    Args:
+        images (numpy.ndarray): The images encoded as numpy arrays
+
+    Returns:
+        numpy.ndarray: The reshaped and normalized images.
+    """
+    
+    ### START CODE HERE ###
+
+    # Reshape the images to add an extra dimension (at the right-most side of the array)
+    images = images.reshape(images.shape[0], images.shape[1], images.shape[2], 1)
+    
+    # Normalize pixel values
+    images =images / 255.0
+    
+    ### END CODE HERE ###
+
+    return images
+Test your function with the next cell:
+
+# Reload the images in case you run this cell multiple times
+(training_images, _), _ = tf.keras.datasets.mnist.load_data(path=data_path)
+
+# Apply your function
+training_images = reshape_and_normalize(training_images)
+
+print(f"Maximum pixel value after normalization: {np.max(training_images)}\n")
+print(f"Shape of training set after reshaping: {training_images.shape}\n")
+print(f"Shape of one image after reshaping: {training_images[0].shape}")
+Maximum pixel value after normalization: 1.0
+
+Shape of training set after reshaping: (60000, 28, 28, 1)
+
+Shape of one image after reshaping: (28, 28, 1)
+Expected Output:
+
+Maximum pixel value after normalization: 1.0
+
+Shape of training set after reshaping: (60000, 28, 28, 1)
+
+Shape of one image after reshaping: (28, 28, 1)
+# Test your code!
+unittests.test_reshape_and_normalize(reshape_and_normalize)
+ All tests passed!
+Exercise 2: EarlyStoppingCallback
+Now it is time to create your own custom callback. For this complete the EarlyStoppingCallback class and the on_epoch_end method in the cell below. If you need some guidance on how to proceed, check out this link.
+
+# GRADED CLASS: EarlyStoppingCallback
+
+import tensorflow as tf
+
+### START CODE HERE ###
+
+# Inherit from the Keras Callback class
+class EarlyStoppingCallback(tf.keras.callbacks.Callback):
+
+    # Override the on_epoch_end method
+    def on_epoch_end(self, epoch, logs=None):
+        
+        # Check if the accuracy is greater or equal to 0.995 (99.5%)
+        if logs.get('accuracy') >= 0.995:
+            
+            # Stop training once the above condition is met
+            self.model.stop_training = True
+            print("\nReached 99.5% accuracy so cancelling training!")
+
+### END CODE HERE ###
+
+# Test your code!
+unittests.test_EarlyStoppingCallback(EarlyStoppingCallback)
+ All tests passed!
+Exercise 3: convolutional_model
+Now that you have defined your callback it is time to complete the convolutional_model function below. This function should return your convolutional neural network.
+
+Your model should achieve an accuracy of 99.5% or more before 10 epochs to pass this assignment.
+
+Hints:
+
+The first layer should take into consideration the input_shape of the data, which in this case is the size of each image plus the extra dimension you added earlier.
+
+The last layer should take into account the number of classes you are trying to predict.
+
+Remember you should add a Conv2d layer and a MaxPooling2D layer.
+
+You can try any architecture for the network but try to keep in mind you don't need a complex one. For instance, only one convolutional layer is needed.
+
+In case you need extra help you can check out an architecture that works pretty well at the end of this notebook.
+
+To avoid timeout issues with the autograder, please limit the number of units in your convolutional and dense layers. An exception will be raised if your model is too large.
+
+# GRADED FUNCTION: convolutional_model
+
+def convolutional_model():
+    """Returns the compiled (but untrained) convolutional model.
+
+    Returns:
+        tf.keras.Model: The model which should implement convolutions.
+    """
+
+    ## START CODE HERE ###
+
+    # Define the model
+    model = tf.keras.models.Sequential([ 
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(28, 28, 1)),  # Conv2D layer with 32 filters and a 3x3 kernel
+        tf.keras.layers.MaxPooling2D(2, 2),  # MaxPooling layer with a 2x2 pool size
+        tf.keras.layers.Flatten(),  # Flatten layer to convert 2D data to 1D
+        tf.keras.layers.Dense(128, activation='relu'),  # Dense layer with 128 units
+        tf.keras.layers.Dense(10, activation='softmax')  # Output layer with 10 units for 10 classes
+    ]) 
+
+    ### END CODE HERE ###
+
+    # Compile the model
+    model.compile(
+        optimizer='adam',
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+          
+    return model
+
+The next cell allows you to check the number of total and trainable parameters of your model and prompts a warning in case these exceeds those of a reference solution, this serves the following 3 purposes listed in order of priority:
+
+Helps you prevent crashing the kernel during training.
+
+Helps you avoid longer-than-necessary training times.
+
+Provides a reasonable estimate of the size of your model. In general you will usually prefer smaller models given that they accomplish their goal successfully.
+
+Notice that this is just informative and may be very well below the actual limit for size of the model necessary to crash the kernel. So even if you exceed this reference you are probably fine. However, if the kernel crashes during training or it is taking a very long time and your model is larger than the reference, come back here and try to get the number of parameters closer to the reference.
+
+# Define your compiled (but untrained) model
+model = convolutional_model()
+
+# Check parameter count against a reference solution
+unittests.parameter_count(model)
+Your model has 693,962 total parameters and the reference is 1,000,000. You are good to go!
+
+Your model has 693,962 trainable parameters and the reference is 1,000,000. You are good to go!
+# Train your model (this can take up to 5 minutes)
+training_history = model.fit(training_images, training_labels, epochs=10, callbacks=[EarlyStoppingCallback()])
+Epoch 1/10
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 44s 23ms/step - accuracy: 0.9144 - loss: 0.2873
+Epoch 2/10
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 42s 22ms/step - accuracy: 0.9840 - loss: 0.0530
+Epoch 3/10
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 41s 22ms/step - accuracy: 0.9899 - loss: 0.0327
+Epoch 4/10
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 42s 22ms/step - accuracy: 0.9938 - loss: 0.0197
+Epoch 5/10
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 0s 22ms/step - accuracy: 0.9956 - loss: 0.0141
+Reached 99.5% accuracy so cancelling training!
+1875/1875 ━━━━━━━━━━━━━━━━━━━━ 42s 22ms/step - accuracy: 0.9956 - loss: 0.0141
+Expected Output:
+
+Reached 99.5% accuracy so cancelling training! printed out before reaching 10 epochs.
+
+# Test your code!
+unittests.test_training_history(training_history)
+ All tests passed!
+Need more help?
+Run the following cell to see an architecture that works well for the problem at hand:
+
+# WE STRONGLY RECOMMEND YOU TO TRY YOUR OWN ARCHITECTURES FIRST
+# AND ONLY RUN THIS CELL IF YOU WISH TO SEE AN ANSWER
+
+encoded_answer = "CiAgIC0gQSB0Zi5rZXJhcy5JbnB1dCB3aXRoIGEgc2hhcGUgdGhhdCBtYXRjaGVzIHRoYXQgb2YgZXZlcnkgaW1hZ2UgaW4gdGhlIHRyYWluaW5nIHNldCBwbHVzIHRoZSBleHRyYSBkaW1lbnNpb24geW91IGFkZGVkCiAgIC0gQSBDb252MkQgbGF5ZXIgd2l0aCAzMiBmaWx0ZXJzLCBhIGtlcm5lbF9zaXplIG9mIDN4MywgUmVMVSBhY3RpdmF0aW9uIGZ1bmN0aW9uCiAgIC0gQSBNYXhQb29saW5nMkQgbGF5ZXIgd2l0aCBhIHBvb2xfc2l6ZSBvZiAyeDIKICAgLSBBIEZsYXR0ZW4gbGF5ZXIgd2l0aCBubyBhcmd1bWVudHMKICAgLSBBIERlbnNlIGxheWVyIHdpdGggMTI4IHVuaXRzIGFuZCBSZUxVIGFjdGl2YXRpb24gZnVuY3Rpb24KICAgLSBBIERlbnNlIGxheWVyIHdpdGggMTAgdW5pdHMgYW5kIHNvZnRtYXggYWN0aXZhdGlvbiBmdW5jdGlvbgo="
+encoded_answer = encoded_answer.encode('ascii')
+answer = base64.b64decode(encoded_answer)
+answer = answer.decode('ascii')
+
+print(answer)
+
+   - A tf.keras.Input with a shape that matches that of every image in the training set plus the extra dimension you added
+   - A Conv2D layer with 32 filters, a kernel_size of 3x3, ReLU activation function
+   - A MaxPooling2D layer with a pool_size of 2x2
+   - A Flatten layer with no arguments
+   - A Dense layer with 128 units and ReLU activation function
+   - A Dense layer with 10 units and softmax activation function
